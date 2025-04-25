@@ -5,7 +5,7 @@ const Class = require("../../models/class/Class");
 // Add or update a class fees
 router.post("/", async (req, res) => {
   try {
-    const { studentclass, fees } = req.body;
+    const { studentclass, fees ,term,year} = req.body;
      classData = await Class.findOne({ studentclass });
     if (classData) {
       classData.fees = fees;
@@ -13,7 +13,7 @@ router.post("/", async (req, res) => {
       return res.status(200).json(classData);
     }
     //if class does not exist, create a new class
-    classData = Class.create({ studentclass, fees });
+    classData = Class.create({ studentclass, fees,term ,year });
     await classData.save();
     res.status(201).json({ msg: "Class fees added successfully" });
   } catch (error) {
@@ -57,6 +57,19 @@ router.put("/:id", async (req, res) => {
     }
     const newUpdatedClass = await Class.findById(req.params.id);
     res.status(200).json(newUpdatedClass);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ msg: "Server error" });
+  }
+});
+//DELETE A CLASS
+router.delete("/:id", async (req, res) => {
+  try {
+    const classData = await Class.findByIdAndDelete(req.params.id);
+    if (!classData) {
+      return res.status(404).json({ msg: "Class not found" });
+    }
+    res.status(200).json({ msg: "Class deleted successfully" });
   } catch (error) {
     console.error(error);
     res.status(500).json({ msg: "Server error" });

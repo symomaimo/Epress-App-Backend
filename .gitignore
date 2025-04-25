@@ -15,3 +15,4 @@ logs/
 Thumbs.db
 # Ignore build artifacts
 dist/
+.env

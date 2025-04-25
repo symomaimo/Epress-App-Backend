@@ -5,52 +5,47 @@ const Student = require("../../models/student/Student");
 const Class = require("../../models/class/Class");
 // Record a Payment
 router.post('/', async (req, res) => {
-  console.log(req.body);  // This will log the body of the incoming request
+  console.log(req.body);
   try {
-    const { studentId, amountPaid, paymentMethod,datePaid } = req.body; // Include paymentMethod
+    const { studentId, amountPaid, paymentMethod, datePaid, year, term } = req.body;
 
-    if (!studentId || !amountPaid || !paymentMethod || !datePaid) {
-      return res.status(400).json({ message: 'All fields are required: studentId, amountPaid, paymentMethod,datepaid. ' });
+    if (!studentId || !amountPaid || !paymentMethod || !datePaid || !year || !term) {
+      return res.status(400).json({ message: 'All fields are required: studentId, amountPaid, paymentMethod, datePaid, year, term.' });
     }
 
-    // Find the student
     const student = await Student.findById(studentId);
     if (!student) {
       return res.status(404).json({ message: 'Student not found.' });
     }
 
-    // Find the class to get the total fees
     const classData = await Class.findOne({ studentclass: student.studentclass });
-
     if (!classData) {
       return res.status(404).json({ message: 'Class not found for the student.' });
     }
 
     const totalFees = classData.fees;
 
-    // Calculate the new balance and carry-over
-    const newTotalPaid = student.feesPaid + amountPaid;
-    const previousBalance = student.carryOver || 0; // Previous carry-over
-    const newBalance = totalFees + previousBalance - newTotalPaid; // Adjust with previous carry-over
-    let carryOver = 0;
+    // Find total paid for the given semester
+    const semesterPayments = await Fees.find({ student: studentId, year, term });
+    const alreadyPaid = semesterPayments.reduce((acc, payment) => acc + payment.amountPaid, 0);
+    const newTotalPaid = alreadyPaid + amountPaid;
+    const newBalance = totalFees - newTotalPaid;
 
+    // Calculate carryOver from overpayments (if any) for this semester
+    let carryOver = 0;
     if (newBalance < 0) {
-      carryOver = Math.abs(newBalance); // Excess payment becomes carry-over
+      carryOver = Math.abs(newBalance);
     }
 
-    // Update the student fees record
-    student.feesPaid = newTotalPaid;
-    student.carryOver = carryOver;
-    await student.save();
-
-    // Save the payment details in the Fees model
     const feesRecord = new Fees({
       student: studentId,
       amountPaid,
-      datePaid: new Date(datePaid),  // ✅ Ensure datePaid is used
+      datePaid: new Date(datePaid),
       balance: newBalance >= 0 ? newBalance : 0,
       carryOver,
-      paymentMethod,  // ✅ Ensure this is included
+      paymentMethod,
+      year,
+      term,
     });
 
     await feesRecord.save();
@@ -58,11 +53,14 @@ router.post('/', async (req, res) => {
     res.status(201).json({
       message: 'Payment recorded successfully.',
       feesRecord,
+      totalPaidForSemester: newTotalPaid,
+      carryOver
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
 // Get all Payments
 router.get('/', async (req, res) => {
   try {
@@ -72,6 +70,7 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 // Get a single Payment
 router.get('/:id', async (req, res) => {
   try {
@@ -84,7 +83,8 @@ router.get('/:id', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-// Update a Payment
+
+// Update a Payment and recalculate balance
 router.put('/:id', async (req, res) => {
   try {
     const { amountPaid, paymentMethod, datePaid } = req.body;
@@ -93,21 +93,43 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ message: 'All fields are required: amountPaid, paymentMethod, datePaid.' });
     }
 
-    const feesRecord = await Fees.findByIdAndUpdate(
-      req.params.id,
-      { amountPaid, paymentMethod, datePaid },
-      { new: true }
-    );
-
-    if (!feesRecord) {
+    const existingPayment = await Fees.findById(req.params.id);
+    if (!existingPayment) {
       return res.status(404).json({ message: 'Payment record not found.' });
     }
 
-    res.status(200).json(feesRecord);
+    // Update the record
+    existingPayment.amountPaid = amountPaid;
+    existingPayment.paymentMethod = paymentMethod;
+    existingPayment.datePaid = new Date(datePaid);
+    await existingPayment.save();
+
+    // Recalculate total paid for the term
+    const payments = await Fees.find({
+      student: existingPayment.student,
+      year: existingPayment.year,
+      term: existingPayment.term
+    });
+
+    const totalPaid = payments.reduce((sum, p) => sum + p.amountPaid, 0);
+
+    const student = await Student.findById(existingPayment.student);
+    const classData = await Class.findOne({ studentclass: student.studentclass });
+
+    const balance = classData.fees - totalPaid;
+
+    res.status(200).json({
+      message: 'Payment updated.',
+      updatedPayment: existingPayment,
+      totalPaid,
+      balance: balance >= 0 ? balance : 0
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
+
 // Delete a Payment
 router.delete('/:id', async (req, res) => {
   try {
@@ -120,16 +142,20 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 // Get all payments for a specific student
 router.get('/student/:studentId', async (req, res) => {
   try {
     const { studentId } = req.params;
+    console.log('Looking up fees for student:', studentId);
+
     const feesRecords = await Fees.find({ student: studentId }).populate('student', 'name');
     res.status(200).json(feesRecords);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
 // Get all payments for a specific class
 router.get('/class/:classId', async (req, res) => {
   try {
@@ -142,6 +168,7 @@ router.get('/class/:classId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 // Get all payments for a specific date
 router.get('/date/:date', async (req, res) => {
   try {
@@ -152,4 +179,31 @@ router.get('/date/:date', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// Get balance for a student in a given term/year
+router.get('/balance/:studentId/:year/:term', async (req, res) => {
+  const { studentId, year, term } = req.params;
+
+  try {
+    const student = await Student.findById(studentId);
+    const classData = await Class.findOne({ studentclass: student.studentclass });
+    const totalFees = classData.fees;
+
+    const payments = await Fees.find({ student: studentId, year, term });
+    const totalPaid = payments.reduce((sum, p) => sum + p.amountPaid, 0);
+
+    const balance = totalFees - totalPaid;
+
+    res.status(200).json({
+      student: student.name,
+      totalFees,
+      totalPaid,
+      balance: balance >= 0 ? balance : 0
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+// Get all payments for a specific term and year
+
+
 module.exports = router;
