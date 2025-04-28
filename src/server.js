@@ -16,7 +16,17 @@ const feesRoutes = require("./routes/fee/FeesRoutes");
 connectDB();
 
 // Middlewares
-app.use(cors()); // <-- allow frontend access
+const cors = require("cors");
+
+// Middleware to allow requests from your frontend (localhost:5173)
+app.use(
+  cors({
+    origin: "http://localhost:5173", // Allow requests from your React app
+    methods: ["GET", "POST", "PUT", "DELETE"], // Allow common HTTP methods
+    credentials: true, // If you're using cookies or authentication headers
+  })
+);
+
 app.use(express.json());
 
 // Test route
