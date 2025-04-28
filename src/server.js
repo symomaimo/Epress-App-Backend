@@ -6,33 +6,29 @@ const mongoose = require("mongoose");
 const connectDB = require("./database/db");
 const cors = require("cors"); // <-- add this
 
-//import routes
+// import routes
 const parentRoutes = require("./routes/parent/parentRoutes");
 const studentRoutes = require("./routes/student/StudentRoutes");
 const classRoutes = require("./routes/class/ClassRoutes");
 const feesRoutes = require("./routes/fee/FeesRoutes");
 
-//COONNECT TO MONGODB
+// CONNECT TO MONGODB
 connectDB();
 
 // Middlewares
 app.use(cors()); // <-- allow frontend access
 app.use(express.json());
 
-app.use(express.json());
+// Test route
 app.get("/", (req, res) => {
   res.send("yooh");
 });
 
-//use routes
-
+// Use routes
 app.use("/parents", parentRoutes);
 app.use("/students", studentRoutes);
 app.use("/classes", classRoutes);
 app.use("/fees", feesRoutes);
 
-app.listen(port, () => {
-  console.log(`listening on port ${port}`);
-});
-
+// Export app for Vercel to use as a serverless function
 module.exports = app;
