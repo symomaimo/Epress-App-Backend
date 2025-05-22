@@ -6,16 +6,27 @@ const Parent = require('../../models/parent/Parent');
 // ADD A STUDENT
 router.post('/', async (req, res) => {
     try {
-        const { firstName, secondName, studentclass, parentDetails } = req.body; // Extract parentDetails from the body
+        const { firstName, secondName, studentclass, parentDetails } = req.body;
+
+        // Normalize input
+        const normalizedFirstName = firstName.trim().toLowerCase();
+        const normalizedSecondName = secondName.trim().toLowerCase();
+        const normalizedClass = studentclass.trim().toLowerCase();
 
         // Check if the student already exists
-        const existingStudent = await Student.findOne({ firstName, secondName,  studentclass });
+        const existingStudent = await Student.findOne({
+            firstName: normalizedFirstName,
+            secondName: normalizedSecondName,
+            studentclass: normalizedClass
+        });
+
         if (existingStudent) {
             return res.status(400).json({ msg: 'Student already exists' });
         }
 
-        // Check if the parent exists, or create a new parent
+        // Check if parent exists
         let parent = await Parent.findOne({ phone: parentDetails.phone });
+
         if (!parent) {
             parent = await Parent.create({
                 name: parentDetails.name,
@@ -25,20 +36,26 @@ router.post('/', async (req, res) => {
             });
         }
 
-        // Create and save a new student
+        // Create and save new student
         const newStudent = await Student.create({
-            firstName,
-            secondName,
-             studentclass,
-            parent: parent._id, // Link the parent by ID
+            firstName: normalizedFirstName,
+            secondName: normalizedSecondName,
+            studentclass: normalizedClass,
+            parent: parent._id
         });
 
         res.status(201).json(newStudent);
     } catch (error) {
         console.error(error);
+
+        if (error.code === 11000) {
+            return res.status(400).json({ msg: 'Duplicate student detected (DB constraint)' });
+        }
+
         res.status(500).json({ msg: 'Server error' });
     }
 });
+
 
 // UPDATE A STUDENT
 router.put('/:id', async (req, res) => {
