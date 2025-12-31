@@ -1,22 +1,16 @@
-// src/database/db.js
 const mongoose = require("mongoose");
 
-const connectDB = async () => {
-  try {
-    const uri = process.env.DATABASE_URI; // e.g. mongodb://localhost:27017/school?replicaSet=rs0
-    if (!uri) throw new Error("DATABASE_URI not set");
-    await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000, maxPoolSize: 20 });
-    console.log("MongoDB connected:", mongoose.connection.name);
-  } catch (error) {
-    console.error("MongoDB connection error:", error.message);
+module.exports = async function connectDB() {
+  const uri = process.env.MONGO_URI || process.env.DATABASE_URI;
+  if (!uri) {
+    console.error("❌ MongoDB connection error: MONGO_URI / DATABASE_URI not set");
     process.exit(1);
   }
-
-  mongoose.connection.on("error", (e) => console.error("Mongo error:", e));
-  process.on("SIGINT", async () => {
-    await mongoose.connection.close();
-    process.exit(0);
-  });
+  try {
+    await mongoose.connect(uri, { maxPoolSize: 10 });
+    console.log("✅ MongoDB connected");
+  } catch (err) {
+    console.error("❌ MongoDB connection error:", err.message);
+    process.exit(1);
+  }
 };
-
-module.exports = connectDB;
