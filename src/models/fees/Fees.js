@@ -51,6 +51,12 @@ const feesSchema = new mongoose.Schema(
 
     // NEW: categorize what this payment was applied to
     category: { type: String, default: "FEES" }, // e.g. "FEES", "EXTRAS", "EXTRA:UNIFORM"
+    
+// ✅ NEW: optional items selected at payment time (persist!)
+demand: { type: [String], default: [] }, // e.g. ["FEEDING_TERMLY"]
+
+// ✅ NEW: for promotions / extra rules that depend on previous class
+previousClass: { type: String, default: null },
 
     // NEW: voiding
     isVoided: { type: Boolean, default: false, index: true },
@@ -60,6 +66,20 @@ const feesSchema = new mongoose.Schema(
       at: { type: Date },
     },
 
+    // ✅ NEW: Store what the system computed as "due" at time of payment
+    dueSnapshot: {
+  tuition: { type: Number, default: 0 },
+  extras: [
+    {
+      key: String,
+      label: String,
+      amount: Number
+    }
+  ],
+  totalDue: { type: Number, default: 0 }
+},
+
+
     // NEW: edit audit trail (director-only changes)
     edits: { type: [EditSnapshotSchema], default: [] },
   },
@@ -68,7 +88,7 @@ const feesSchema = new mongoose.Schema(
 
 /* ---------- helpful indexes for reports & lookups ---------- */
 feesSchema.index({ datePaid: 1, paymentMethod: 1, isVoided: 1 });
-feesSchema.index({ student: 1, year: 1, term: 1, isVoided: 1 });
+feesSchema.index({ student: 1, year: 1, term: 1, isVoided: 1, datePaid: -1 });
 feesSchema.index({ year: 1, term: 1, paymentMethod: 1, isVoided: 1 });
 
 module.exports = mongoose.model("Fees", feesSchema);
