@@ -447,12 +447,14 @@ router.get("/", async (req, res) => {
     const rawYear = req.query.year;
     const year = rawYear != null && rawYear !== "" ? Number(rawYear) : null;
     const onlyEnrolled = String(req.query.onlyEnrolled || "false") === "true";
+    const mode = String(req.query.mode || "active").toLowerCase(); // ✅ ADD THIS
 
     console.log("\n==== GET /students START ====");
     console.log("query:", req.query);
     console.log("parsed:", {
       year,
       onlyEnrolled,
+      mode,
       mongoReadyState: mongoose.connection.readyState,
       at: new Date().toISOString(),
     });
@@ -469,7 +471,16 @@ router.get("/", async (req, res) => {
       return res.status(400).json({ error: "Invalid year query parameter." });
     }
 
-    let filter = { status: "active" };
+    // ✅ MODE FILTER
+    let filter = {};
+
+    if (mode === "inactive") {
+      filter.status = "inactive";
+    } else {
+      filter.status = { $ne: "inactive" };
+    }
+
+    // ✅ keep year enrollment filter
     if (year && onlyEnrolled) {
       filter["enrollments.year"] = year;
     }
@@ -534,6 +545,36 @@ router.get("/", async (req, res) => {
   }
 });
 
+router.patch(
+  "/:id/restore",
+  auth,
+  allowRoles("DIRECTOR", "SECRETARY"),
+  async (req, res) => {
+    try {
+      const student = await Student.findById(req.params.id);
+
+      if (!student) {
+        return res.status(404).json({ msg: "Student not found" });
+      }
+
+      student.status = "active";
+      student.inactiveMeta = undefined;
+
+      await student.save();
+
+      const restored = await Student.findById(student._id).populate("parent");
+
+      return res.status(200).json({
+        ok: true,
+        msg: "Student restored successfully",
+        student: restored,
+      });
+    } catch (error) {
+      console.error("RESTORE STUDENT FAILED:", error);
+      return res.status(500).json({ msg: "Server error" });
+    }
+  }
+);
 /* ✅ GET ONE STUDENT */
 // router.get("/:id", async (req, res) => {
 //   try {

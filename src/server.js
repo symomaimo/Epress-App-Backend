@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const compression = require("compression");
+const path = require("path");
 require("dotenv").config();
 
 const connectDB = require("./database/db");
@@ -45,7 +46,7 @@ app.use(express.urlencoded({ extended: true }));
 connectDB();
 
 /** ---------- health & root ---------- */
-app.get("/", (req, res) => res.send("yooh"));
+const publicPath = path.join(__dirname, "..", "public");
 app.get("/api/health", (req, res) =>
   res.json({ ok: true, env: process.env.NODE_ENV || "development" })
 );
@@ -59,8 +60,13 @@ app.use("/fees", feesRoutes);
 app.use("/extraprices", extraPriceRoutes);
 app.use("/adjustments", adjustmentRoutes);
 
-/** ---------- 404 ---------- */
-app.use((req, res) => res.status(404).json({ error: "Not found" }));
+/** ---------- frontend ---------- */
+app.use(express.static(publicPath));
+
+app.get("*", (req, res) => {
+  res.sendFile(path.join(publicPath, "index.html"));
+});
+
 
 /** ---------- error handler ---------- */
 app.use((err, req, res, next) => {

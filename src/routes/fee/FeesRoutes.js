@@ -68,10 +68,11 @@ function normalizeClassLabel(raw) {
 // ---------- helper: compute due (tuition + extras) ----------
 // ---------- helper: compute due (tuition + extras) ----------
 async function computeDueBreakdown(student, year, term, classRow, opts = {}) {
-  const tuition = Number(classRow.fees);
+  const tuition = Number(classRow.fees || 0);
   const priceCache = opts.priceCache || new Map();
 
   const previousClass = opts.previousClass || null;
+
   const demand =
     typeof opts.demand === "string"
       ? opts.demand
@@ -79,13 +80,29 @@ async function computeDueBreakdown(student, year, term, classRow, opts = {}) {
           .map((x) => x.trim().toUpperCase())
           .filter(Boolean)
       : Array.isArray(opts.demand)
-      ? opts.demand.map((x) => String(x).trim().toUpperCase()).filter(Boolean)
+      ? opts.demand
+          .map((x) => {
+            if (typeof x === "string") {
+              return x.trim().toUpperCase();
+            }
+
+            if (x && typeof x === "object") {
+              return {
+                key: String(x.key || "").trim().toUpperCase(),
+                variant: x.variant
+                  ? String(x.variant).trim().toUpperCase()
+                  : undefined,
+              };
+            }
+
+            return null;
+          })
+          .filter(Boolean)
       : [];
 
   const perYearAlreadyCharged = opts.perYearAlreadyCharged || new Set();
   const onceAlreadyCharged = opts.onceAlreadyCharged || new Set();
 
-  // Which extras apply (no amounts yet)
   const needed = computeExtras(student, Number(year), term, {
     previousClass,
     demand,
@@ -93,10 +110,11 @@ async function computeDueBreakdown(student, year, term, classRow, opts = {}) {
     onceAlreadyCharged,
   });
 
-  const effectiveClass = getClassForYear(student, year) || student.studentclass || "";
+  const effectiveClass =
+    getClassForYear(student, year) || student.studentclass || "";
 
-  // Look up amounts from DB for each extra
   const extras = [];
+
   for (const item of needed) {
     const isGlobalKey =
       /^TEXTBOOKS_STAGE_/.test(item.key) ||
@@ -132,10 +150,10 @@ async function computeDueBreakdown(student, year, term, classRow, opts = {}) {
     ].join("|");
 
     let amt;
+
     if (priceCache.has(cacheKey)) {
       amt = priceCache.get(cacheKey);
     } else {
-      // eslint-disable-next-line no-await-in-loop
       amt = await resolvePrice(
         item.key,
         classLabelForPrice,
@@ -143,6 +161,7 @@ async function computeDueBreakdown(student, year, term, classRow, opts = {}) {
         term,
         safeVariant
       );
+
       priceCache.set(cacheKey, amt);
     }
 
@@ -158,7 +177,12 @@ async function computeDueBreakdown(student, year, term, classRow, opts = {}) {
   const extrasTotal = extras.reduce((a, e) => a + Number(e.amount || 0), 0);
   const totalDue = tuition + extrasTotal;
 
-  return { tuition, extras, extrasTotal, totalDue };
+  return {
+    tuition,
+    extras,
+    extrasTotal,
+    totalDue,
+  };
 }
 
 function yyyymmddLocal(d = new Date()) {
@@ -1011,8 +1035,8 @@ router.get("/status-summary", async (req, res, next) => {
 
     const studentIds = students.map((s) => s._id);
 
-    // class fee rows for the term
     const classRows = await Class.find({ year, term }).lean();
+
     const classFeeMap = new Map(
       classRows.map((r) => [
         normalizeGradeLabel(String(r.studentclass || "").trim()),
@@ -1020,7 +1044,6 @@ router.get("/status-summary", async (req, res, next) => {
       ])
     );
 
-    // payments aggregate
     const paymentsAgg = await Fees.aggregate([
       {
         $match: {
@@ -1042,7 +1065,6 @@ router.get("/status-summary", async (req, res, next) => {
       paymentsAgg.map((r) => [String(r._id), Number(r.paid || 0)])
     );
 
-    // adjustments aggregate
     const adjAgg = await Adjustment.aggregate([
       {
         $match: {
@@ -1063,16 +1085,80 @@ router.get("/status-summary", async (req, res, next) => {
       adjAgg.map((r) => [String(r._id), Number(r.total || 0)])
     );
 
+    const historyPayments = await Fees.find({
+      student: { $in: studentIds },
+      isVoided: { $ne: true },
+    })
+      .select("student year term dueSnapshot")
+      .lean();
+
+    const chargedMap = new Map();
+
+    for (const p of historyPayments) {
+      const sid = String(p.student);
+
+      if (!chargedMap.has(sid)) {
+        chargedMap.set(sid, {
+          onceAlreadyCharged: new Set(),
+          perYearAlreadyCharged: new Set(),
+        });
+      }
+
+      const entry = chargedMap.get(sid);
+      const extras = p?.dueSnapshot?.extras || [];
+
+      for (const ex of extras) {
+        if (!ex?.key) continue;
+
+        const key = String(ex.key).trim().toUpperCase();
+
+        entry.onceAlreadyCharged.add(key);
+
+        if (Number(p.year) === year) {
+          entry.perYearAlreadyCharged.add(key);
+        }
+      }
+    }
+
     const priceCache = new Map();
     const items = [];
 
     for (const student of students) {
       const sid = String(student._id);
 
-      const enr = (student.enrollments || []).find((e) => Number(e.year) === year);
+      const enr = (student.enrollments || []).find(
+        (e) => Number(e.year) === year
+      );
+
       const classLabel = enr?.classLabel || student.studentclass || "";
       const normalizedClass = normalizeGradeLabel(classLabel);
       const tuition = Number(classFeeMap.get(normalizedClass) || 0);
+
+      const charged = chargedMap.get(sid) || {
+        onceAlreadyCharged: new Set(),
+        perYearAlreadyCharged: new Set(),
+      };
+
+      const termOptIns = enr?.termOptIns?.[term] || {};
+
+      const demand = Object.entries(termOptIns)
+        .filter(([key, value]) => {
+          if (value === true) return true;
+          if (typeof value === "string" && value.trim()) return true;
+          return false;
+        })
+        .map(([key, value]) => {
+          const cleanKey = String(key).trim().toUpperCase();
+
+          if (cleanKey === "TRANSPORT") {
+            return {
+              key: cleanKey,
+              variant: String(value).trim().toUpperCase(),
+            };
+          }
+
+          return cleanKey;
+        });
 
       const due = await computeDueBreakdown(
         { ...student, studentclass: classLabel },
@@ -1081,9 +1167,9 @@ router.get("/status-summary", async (req, res, next) => {
         { fees: tuition },
         {
           previousClass: null,
-          demand: null,
-          onceAlreadyCharged: new Set(),
-          perYearAlreadyCharged: new Set(),
+          demand,
+          onceAlreadyCharged: charged.onceAlreadyCharged,
+          perYearAlreadyCharged: charged.perYearAlreadyCharged,
           priceCache,
         }
       );
@@ -1091,12 +1177,17 @@ router.get("/status-summary", async (req, res, next) => {
       const adjustments = adjMap.get(sid) || 0;
       const total = Number(due.totalDue || 0) + adjustments;
       const paid = paidMap.get(sid) || 0;
+
       const balanceRaw = total - paid;
       const balance = balanceRaw > 0 ? balanceRaw : 0;
 
       let status = "OWING";
-      if (total > 0 && balance <= 0) status = "PAID";
-      else if (paid > 0 && paid < total) status = "PART";
+
+      if (total > 0 && balance <= 0) {
+        status = "PAID";
+      } else if (paid > 0 && paid < total) {
+        status = "PART";
+      }
 
       items.push({
         studentId: sid,
@@ -1160,7 +1251,7 @@ router.get("/by-student/:id", async (req, res, next) => {
 router.get(
   "/receipt-by-number/:no",
   auth,
-  allowRoles("DIRECTOR"),
+  allowRoles("DIRECTOR","SECRETARY"),
   async (req, res, next) => {
     try {
       const p = await Fees.findOne({ receiptNo: req.params.no })
