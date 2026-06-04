@@ -463,6 +463,7 @@ async function buildTermMetrics(year, term) {
     optIns: optInsNonZero,
     topDefaulters,
     classBreakdown,
+    perStudent,
     missingFeeRows,
   };
 }
@@ -1000,6 +1001,67 @@ router.get(
     }
   }
 );
+
+// GET /fees/class-debtors?year=2026&term=Term1
+router.get("/class-debtors", auth, async (req, res, next) => {
+  try {
+    const year = Number(req.query.year);
+    const term = String(req.query.term || "").trim();
+
+    if (!year || !term) {
+      return res.status(400).json({
+        error: "year and term are required",
+      });
+    }
+
+    const metrics = await buildTermMetrics(year, term);
+
+    const grouped = {};
+
+    for (const item of metrics.perStudent || []) {
+      const balance = Number(item.balance || 0);
+      if (balance <= 0) continue;
+
+      const total = Number(item.expected || 0);
+      const paid = Number(item.paid || 0);
+      const classLabel = item.classLabel || "Unassigned";
+
+      const status = paid > 0 ? "PART" : "OWING";
+
+      if (!grouped[classLabel]) {
+        grouped[classLabel] = [];
+      }
+
+      grouped[classLabel].push({
+        studentId: item.studentId,
+        name: item.name,
+        classLabel,
+        total,
+        paid,
+        balance,
+        status,
+      });
+    }
+
+    for (const cls of Object.keys(grouped)) {
+      grouped[cls].sort((a, b) => b.balance - a.balance);
+    }
+
+    return res.json({
+      year,
+      term,
+      classes: grouped,
+      totalExpected: metrics.totalExpected,
+      totalPaid: metrics.totalReceived,
+      totalBalance: metrics.totalBalance,
+      currency: "KES",
+    });
+  } catch (e) {
+    console.error("GET /fees/class-debtors failed");
+    console.error(e);
+    next(e);
+  }
+});
 
 
 // GET /fees/status-summary?year=2026&term=Term1
