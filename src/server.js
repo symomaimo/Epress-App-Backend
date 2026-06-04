@@ -13,6 +13,7 @@ const parentRoutes = require("./routes/parent/parentRoutes");
 const studentRoutes = require("./routes/student/StudentRoutes");
 const classRoutes = require("./routes/class/ClassRoutes");
 const feesRoutes = require("./routes/fee/FeesRoutes");
+const feedingRoutes = require("./routes/feeding/FeedingRoutes");
 const extraPriceRoutes = require("./routes/extraprice/ExtraPrice");
 const adjustmentRoutes = require("./routes/adjustment/Adjustment");
 
@@ -57,6 +58,7 @@ app.use("/parents", parentRoutes);
 app.use("/students", studentRoutes);
 app.use("/classes", classRoutes);
 app.use("/fees", feesRoutes);
+app.use("/feeding", feedingRoutes);
 app.use("/extraprices", extraPriceRoutes);
 app.use("/adjustments", adjustmentRoutes);
 
